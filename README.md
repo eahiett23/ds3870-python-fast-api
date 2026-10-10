@@ -27,6 +27,7 @@ Startup also creates the `inquiries` table with the `Inquiry` model's fields:
 `customer_name`, `email`, `company`, `service`, `project_details`, and `budget`.
 All fields are non-nullable, and `budget` defaults to an empty string. An additional
 `id` UUID string is the primary key, generated on SQLAlchemy inserts, allowing
-multiple inquiries per email. The inquiry API still uses in-memory storage;
-adding the table does not change how submissions are saved. Input validation
+multiple inquiries per email. The inquiry API saves submissions using SQLAlchemy,
+and the admin inquiry list reads them from the database. Job tracking remains
+in memory and resets when the application restarts. Input validation
 (such as minimum lengths and email format) remains in the Pydantic model.

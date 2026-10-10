@@ -7,11 +7,12 @@ from typing import Literal
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
+from sqlalchemy import select
 
-from database import initialize_database
+from database import initialize_database, tbl_inquiries
 
 load_dotenv(Path(__file__).with_name(".env"), override=False)
 
@@ -31,9 +32,8 @@ app = FastAPI(title="Swollen Hippo Industries", version="1.0.0", lifespan=app_li
 _template_path = Path(__file__).parent / "templates" / "index.html"
 
 _STAGES = ["Pending", "In Production", "Quality Check", "Shipped", "Completed"]
-# In-memory storage is intentionally used for this prototype; restarting clears data.
+# Job tracking remains in memory; inquiry submissions are persisted in the database.
 _jobs: list[dict] = []
-_inquiries: list[dict] = []
 
 
 class Inquiry(BaseModel):
@@ -60,11 +60,13 @@ async def home() -> HTMLResponse:
 
 
 @app.post("/api/inquiry", status_code=201)
-async def create_inquiry(payload: Inquiry) -> dict:
+async def create_inquiry(payload: Inquiry, obj_request: Request) -> dict:
     """Save an inquiry and create its initial job record."""
     str_id = str(uuid4())
     str_created = datetime.now(timezone.utc).isoformat()
     dict_inquiry = payload.model_dump(mode="json")
+    with obj_request.app.state.obj_engine.begin() as obj_connection:
+        obj_connection.execute(tbl_inquiries.insert().values(id=str_id, **dict_inquiry))
     dict_inquiry.update({"id": str_id, "created_at": str_created})
     dict_job = {
         "id": str_id,
@@ -74,13 +76,13 @@ async def create_inquiry(payload: Inquiry) -> dict:
         "estimated_shipping_date": None,
         "created_at": str_created,
     }
-    _inquiries.append(dict_inquiry)
     _jobs.append(dict_job)
     return {"message": "Inquiry received. Our team will be in touch soon.", "job": dict_job}
 
 
 @app.get("/api/jobs")
 async def list_jobs(
+    obj_request: Request,
     role: Literal["customer", "admin"] = Query(default="customer"),
     x_user_role: str | None = Header(default=None),
 ) -> dict:
@@ -90,7 +92,12 @@ async def list_jobs(
     lst_jobs = _jobs if role == "admin" else [
         dict_job for dict_job in _jobs if dict_job["status"] != "Completed"
     ]
-    return {"jobs": lst_jobs, "inquiries": _inquiries if role == "admin" else []}
+    lst_inquiries = []
+    if role == "admin":
+        with obj_request.app.state.obj_engine.connect() as obj_connection:
+            lst_inquiries = [dict(obj_row) for obj_row in
+                             obj_connection.execute(select(tbl_inquiries)).mappings()]
+    return {"jobs": lst_jobs, "inquiries": lst_inquiries}
 
 
 @app.put("/api/jobs/{job_id}")
