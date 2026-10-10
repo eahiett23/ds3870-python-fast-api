@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 
-from database import initialize_database, tbl_inquiries
+from database import initialize_database, tbl_inquiries, tbl_jobs
 
 load_dotenv(Path(__file__).with_name(".env"), override=False)
 
@@ -32,8 +32,6 @@ app = FastAPI(title="Swollen Hippo Industries", version="1.0.0", lifespan=app_li
 _template_path = Path(__file__).parent / "templates" / "index.html"
 
 _STAGES = ["Pending", "In Production", "Quality Check", "Shipped", "Completed"]
-# Job tracking remains in memory; inquiry submissions are persisted in the database.
-_jobs: list[dict] = []
 
 
 class Inquiry(BaseModel):
@@ -65,18 +63,18 @@ async def create_inquiry(payload: Inquiry, obj_request: Request) -> dict:
     str_id = str(uuid4())
     str_created = datetime.now(timezone.utc).isoformat()
     dict_inquiry = payload.model_dump(mode="json")
-    with obj_request.app.state.obj_engine.begin() as obj_connection:
-        obj_connection.execute(tbl_inquiries.insert().values(id=str_id, **dict_inquiry))
-    dict_inquiry.update({"id": str_id, "created_at": str_created})
     dict_job = {
         "id": str_id,
         **dict_inquiry,
+        "inquiry_id": str_id,
         "status": "Pending",
         "estimated_completion_date": None,
         "estimated_shipping_date": None,
         "created_at": str_created,
     }
-    _jobs.append(dict_job)
+    with obj_request.app.state.obj_engine.begin() as obj_connection:
+        obj_connection.execute(tbl_inquiries.insert().values(id=str_id, **dict_inquiry))
+        obj_connection.execute(tbl_jobs.insert().values(**dict_job))
     return {"message": "Inquiry received. Our team will be in touch soon.", "job": dict_job}
 
 
@@ -89,12 +87,13 @@ async def list_jobs(
     """Return jobs visible to the selected demo role."""
     if role == "admin" and x_user_role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
-    lst_jobs = _jobs if role == "admin" else [
-        dict_job for dict_job in _jobs if dict_job["status"] != "Completed"
-    ]
+    obj_query = select(tbl_jobs)
+    if role != "admin":
+        obj_query = obj_query.where(tbl_jobs.c.status != "Completed")
     lst_inquiries = []
-    if role == "admin":
-        with obj_request.app.state.obj_engine.connect() as obj_connection:
+    with obj_request.app.state.obj_engine.connect() as obj_connection:
+        lst_jobs = [dict(obj_row) for obj_row in obj_connection.execute(obj_query).mappings()]
+        if role == "admin":
             lst_inquiries = [dict(obj_row) for obj_row in
                              obj_connection.execute(select(tbl_inquiries)).mappings()]
     return {"jobs": lst_jobs, "inquiries": lst_inquiries}
@@ -104,13 +103,17 @@ async def list_jobs(
 async def update_job(
     job_id: str,
     payload: JobUpdate,
+    obj_request: Request,
     x_user_role: str | None = Header(default=None),
 ) -> dict:
     """Update job stage and schedule; the demo admin role is supplied by header."""
     if x_user_role != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
-    dict_job = next((job for job in _jobs if job["id"] == job_id), None)
-    if dict_job is None:
-        raise HTTPException(status_code=404, detail="Job not found")
-    dict_job.update(payload.model_dump(mode="json"))
+    with obj_request.app.state.obj_engine.begin() as obj_connection:
+        obj_result = obj_connection.execute(
+            tbl_jobs.update().where(tbl_jobs.c.id == job_id).values(**payload.model_dump()))
+        if obj_result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Job not found")
+        dict_job = dict(obj_connection.execute(
+            select(tbl_jobs).where(tbl_jobs.c.id == job_id)).mappings().one())
     return {"message": "Job updated", "job": dict_job}

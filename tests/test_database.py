@@ -31,8 +31,12 @@ class DatabaseStartupTests(unittest.TestCase):
                 with TestClient(app):
                     obj_engine = app.state.obj_engine
                     obj_inspector = inspect(obj_engine)
-                    self.assertEqual(set(obj_inspector.get_table_names()), {"users", "inquiries"})
+                    self.assertEqual(set(obj_inspector.get_table_names()), {"users", "inquiries", "jobs"})
                     self.assertEqual(obj_inspector.get_pk_constraint("inquiries")["constrained_columns"], ["id"])
+                    dict_foreign_key = obj_inspector.get_foreign_keys("jobs")[0]
+                    self.assertEqual(dict_foreign_key["constrained_columns"], ["inquiry_id"])
+                    self.assertEqual(dict_foreign_key["referred_table"], "inquiries")
+                    self.assertEqual(dict_foreign_key["referred_columns"], ["id"])
                     lst_columns = obj_inspector.get_columns("inquiries")
                     self.assertEqual({obj_column["name"] for obj_column in lst_columns},
                                      set(Inquiry.model_fields) | {"id"})

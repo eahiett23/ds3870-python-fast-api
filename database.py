@@ -3,7 +3,7 @@
 import os
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, MetaData, String, Table, create_engine, false
+from sqlalchemy import Boolean, Column, Date, ForeignKey, MetaData, String, Table, create_engine, event, false
 from sqlalchemy.engine import Engine
 
 obj_metadata = MetaData()
@@ -30,12 +30,41 @@ tbl_inquiries = Table(
 )
 
 
+tbl_jobs = Table(
+    "jobs",
+    obj_metadata,
+    Column("id", String(36), primary_key=True, default=lambda: str(uuid4())),
+    Column("inquiry_id", String(36), ForeignKey("inquiries.id"), nullable=False, index=True),
+    Column("customer_name", String(120), nullable=False),
+    Column("email", String(254), nullable=False),
+    Column("company", String(120), nullable=False),
+    Column("service", String(100), nullable=False),
+    Column("project_details", String(4000), nullable=False),
+    Column("budget", String(80), nullable=False, server_default=""),
+    Column("status", String(30), nullable=False, server_default="Pending"),
+    Column("estimated_completion_date", Date, nullable=True),
+    Column("estimated_shipping_date", Date, nullable=True),
+    Column("created_at", String(40), nullable=False),
+)
+
+
+def enable_sqlite_foreign_keys(obj_connection, obj_connection_record):
+    """SQLite requires foreign key enforcement to be enabled per connection."""
+    obj_cursor = obj_connection.cursor()
+    try:
+        obj_cursor.execute("PRAGMA foreign_keys=ON")
+    finally:
+        obj_cursor.close()
+
+
 def initialize_database() -> Engine:
     """Create missing tables without changing existing tables or records."""
     str_connection_string = os.environ.get("CONNECTIONSTRING")
     if not str_connection_string or not str_connection_string.strip():
         raise RuntimeError("CONNECTIONSTRING must be set before starting the app.")
     obj_engine = create_engine(str_connection_string)
+    if obj_engine.dialect.name == "sqlite":
+        event.listen(obj_engine, "connect", enable_sqlite_foreign_keys)
     try:
         obj_metadata.create_all(obj_engine, checkfirst=True)
     except Exception:
