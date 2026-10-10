@@ -7,14 +7,57 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.exc import IntegrityError
 
-from database import tbl_users
-from main import app
+from database import tbl_inquiries, tbl_users
+from main import Inquiry, app
 
 
 class DatabaseStartupTests(unittest.TestCase):
+    def test_startup_adds_inquiries_to_existing_database_and_preserves_records(self):
+        with tempfile.TemporaryDirectory() as str_directory:
+            str_url = "sqlite:///" + (Path(str_directory) / "test.db").as_posix()
+            obj_engine = create_engine(str_url)
+            try:
+                tbl_users.create(obj_engine)
+            finally:
+                obj_engine.dispose()
+            obj_inquiry = Inquiry(customer_name="Test Customer", email="test@example.com",
+                                  company="Test Company", service="Prototyping",
+                                  project_details="Build a prototype for testing.")
+            dict_inquiry = obj_inquiry.model_dump(mode="json", exclude_unset=True)
+            with patch.dict(os.environ, {"CONNECTIONSTRING": str_url}):
+                with TestClient(app):
+                    obj_engine = app.state.obj_engine
+                    obj_inspector = inspect(obj_engine)
+                    self.assertEqual(set(obj_inspector.get_table_names()), {"users", "inquiries"})
+                    self.assertEqual(obj_inspector.get_pk_constraint("inquiries")["constrained_columns"], ["id"])
+                    lst_columns = obj_inspector.get_columns("inquiries")
+                    self.assertEqual({obj_column["name"] for obj_column in lst_columns},
+                                     set(Inquiry.model_fields) | {"id"})
+                    self.assertTrue(all(not obj_column["nullable"] for obj_column in lst_columns))
+                    dict_lengths = {obj_column["name"]: obj_column["type"].length for obj_column in lst_columns}
+                    self.assertEqual(dict_lengths, {"id": 36, "customer_name": 120, "email": 254,
+                                                    "company": 120, "service": 100,
+                                                    "project_details": 4000, "budget": 80})
+                    with obj_engine.begin() as obj_connection:
+                        # Repeat emails are allowed; each inquiry gets its own identifier.
+                        obj_connection.execute(tbl_inquiries.insert().values(**dict_inquiry))
+                        obj_connection.execute(tbl_inquiries.insert().values(**dict_inquiry))
+                    with self.assertRaises(IntegrityError):
+                        with obj_engine.begin() as obj_connection:
+                            obj_connection.execute(tbl_inquiries.insert().values(
+                                **{**dict_inquiry, "project_details": None}))
+                with TestClient(app):
+                    with app.state.obj_engine.connect() as obj_connection:
+                        lst_inquiries = obj_connection.execute(select(tbl_inquiries)).mappings().all()
+                    self.assertEqual(len(lst_inquiries), 2)
+                    self.assertNotEqual(lst_inquiries[0]["id"], lst_inquiries[1]["id"])
+                    for dict_record in lst_inquiries:
+                        self.assertEqual({str_key: dict_record[str_key] for str_key in Inquiry.model_fields},
+                                         obj_inquiry.model_dump(mode="json"))
+
     def test_startup_creates_schema_and_preserves_users_on_restart(self):
         with tempfile.TemporaryDirectory() as str_directory:
             str_url = "sqlite:///" + (Path(str_directory) / "test.db").as_posix()

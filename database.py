@@ -1,6 +1,7 @@
 """Database schema and startup initialization."""
 
 import os
+from uuid import uuid4
 
 from sqlalchemy import Boolean, Column, MetaData, String, Table, create_engine, false
 from sqlalchemy.engine import Engine
@@ -14,6 +15,18 @@ tbl_users = Table(
     Column("last_name", String(120), nullable=False),
     Column("is_admin", Boolean, nullable=False, server_default=false()),
     Column("hashed_password", String(1024), nullable=False),
+)
+
+tbl_inquiries = Table(
+    "inquiries",
+    obj_metadata,
+    Column("id", String(36), primary_key=True, default=lambda: str(uuid4())),
+    Column("customer_name", String(120), nullable=False),
+    Column("email", String(254), nullable=False),
+    Column("company", String(120), nullable=False),
+    Column("service", String(100), nullable=False),
+    Column("project_details", String(4000), nullable=False),
+    Column("budget", String(80), nullable=False, server_default=""),
 )
 
 

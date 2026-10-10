@@ -22,3 +22,11 @@ This runs the web UI on port 8000. The UI can be reached in the following URL:
 
 Run automated tests with `python -m unittest discover -s tests -v`.
 Tests use a temporary SQLite database, independent of your configured database.
+
+Startup also creates the `inquiries` table with the `Inquiry` model's fields:
+`customer_name`, `email`, `company`, `service`, `project_details`, and `budget`.
+All fields are non-nullable, and `budget` defaults to an empty string. An additional
+`id` UUID string is the primary key, generated on SQLAlchemy inserts, allowing
+multiple inquiries per email. The inquiry API still uses in-memory storage;
+adding the table does not change how submissions are saved. Input validation
+(such as minimum lengths and email format) remains in the Pydantic model.
