@@ -1,5 +1,6 @@
 """Swollen Hippo Industries rapid prototyping demo application."""
 
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -9,7 +10,21 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
 
-app = FastAPI(title="Swollen Hippo Industries", version="1.0.0")
+from database import initialize_database
+
+
+@asynccontextmanager
+async def app_lifespan(obj_app: FastAPI):
+    """Initialize the schema at startup and release connections at shutdown."""
+    obj_engine = initialize_database()
+    obj_app.state.obj_engine = obj_engine
+    try:
+        yield
+    finally:
+        obj_engine.dispose()
+
+
+app = FastAPI(title="Swollen Hippo Industries", version="1.0.0", lifespan=app_lifespan)
 _template_path = Path(__file__).parent / "templates" / "index.html"
 
 _STAGES = ["Pending", "In Production", "Quality Check", "Shipped", "Completed"]
