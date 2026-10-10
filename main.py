@@ -6,11 +6,14 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
 
 from database import initialize_database
+
+load_dotenv(Path(__file__).with_name(".env"), override=False)
 
 
 @asynccontextmanager
