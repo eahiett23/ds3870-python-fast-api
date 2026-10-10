@@ -6,7 +6,7 @@
     "configurations": [
 
         {
-            "name": "Python Debugger: Module",
+            "name": "Debug App",
             "type": "debugpy",
             "request": "launch",
             "module": "uvicorn",
