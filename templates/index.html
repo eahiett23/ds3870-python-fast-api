@@ -107,7 +107,7 @@
       const elSubmit = elForm.querySelector('[type="submit"]');
       elSubmit.disabled = true;elMessage.className='form-note mt-2 small text-secondary';elMessage.textContent='Sending your inquiry…';
       const objPayload = Object.fromEntries(new FormData(elForm).entries());
-      try {const objResponse = await fetch(`${strApi}/inquiry`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(objPayload)});const objData=await objResponse.json();if(!objResponse.ok) throw new Error(objData.detail?.[0]?.msg || objData.detail || 'We could not send your inquiry. Please try again.');elMessage.className='form-note mt-2 small text-success';elMessage.textContent=objData.message;elForm.reset();elForm.classList.remove('was-validated');}
+      try {const objResponse = await fetch(`${strApi}/inquiry`,{method:'POST',headers:{'Content-Type':'application/json',...(typeof authHeaders === 'function' ? authHeaders() : {})},body:JSON.stringify(objPayload)});const objData=await objResponse.json();if(!objResponse.ok) throw new Error(objData.detail?.[0]?.msg || objData.detail || 'We could not send your inquiry. Please try again.');elMessage.className='form-note mt-2 small text-success';elMessage.textContent=objData.message;elForm.reset();elForm.classList.remove('was-validated');}
       catch(objError){elMessage.className='form-note mt-2 small text-danger';elMessage.textContent=objError.message;}
       finally{elSubmit.disabled=false;}
     });
@@ -122,5 +122,7 @@
     });
     showView('landing');
   </script>
+  <script src="/production.js"></script>
 </body>
 </html>
+

@@ -1,5 +1,12 @@
 # Job Intake App
 
+## Production MySQL integration
+
+The app now supports the six-table production schema in `production/`. See
+[INTEGRATION.md](INTEGRATION.md) for installation, account provisioning, privileges
+and the differences from the demo. MySQL defaults to production mode; SQLite
+defaults to demo mode. The setup below describes the original demo schema.
+
 ## Quick Start
 
 Set the `CONNECTIONSTRING` environment variable to your SQLAlchemy database URL
