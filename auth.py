@@ -1,4 +1,4 @@
-""Login system for Swollen Hippo Industries.
+"""Login system for Swollen Hippo Industries.
 
 How it works:
 1. The user logs in with an email and a password.
@@ -165,7 +165,8 @@ def login(obj_body: LoginBody, obj_request: Request, obj_response: Response) -> 
         )
 
     # Set COOKIE_SECURE=true in .env when the site runs on https
-    bool_cookie_secure = os.environ.get("COOKIE_SECURE", "false").lower() == "true"
+    str_secure_default = "true" if os.environ.get("DATABASE_MODE", "demo").lower() == "production" else "false"
+    bool_cookie_secure = os.environ.get("COOKIE_SECURE", str_secure_default).lower() == "true"
     obj_response.set_cookie(
         key=str_cookie_name,
         value=str_token,

@@ -29,23 +29,28 @@
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
           <li class="nav-item"><a class="nav-link" href="#services" id="services-link">Capabilities</a></li>
           <li class="nav-item"><a class="nav-link" href="#inquiry" id="inquiry-link">Start a project</a></li>
-          <li class="nav-item ms-lg-2"><label for="role-toggle" class="visually-hidden">Preview application role</label><select class="form-select form-select-sm role-select" id="role-toggle" aria-label="Preview application role"><option value="landing">Logged out · Landing</option><option value="customer">Logged in · Customer</option><option value="admin">Logged in · Admin</option></select></li>
+          <li class="nav-item ms-lg-2"><button class="btn btn-link nav-link" id="dashboard-link" type="button" hidden>My dashboard</button></li>
+          <li class="nav-item"><button class="btn btn-outline-earth btn-sm rounded-pill px-3" id="login-open" type="button" data-auth-mode="login">Log in</button></li>
+          <li class="nav-item"><button class="btn btn-earth btn-sm rounded-pill px-3" id="register-open" type="button" data-auth-mode="register">Sign up</button></li>
+          <li class="nav-item" id="signed-in-label" hidden><span class="small fw-semibold" id="signed-in-name"></span></li>
+          <li class="nav-item"><button class="btn btn-outline-earth btn-sm rounded-pill px-3" id="logout-button" type="button" hidden>Log out</button></li>
         </ul>
       </div>
     </div>
   </nav>
   <main id="main-content" tabindex="-1"><div id="app-view"></div></main>
   <footer class="footer py-4"><div class="container d-flex flex-column flex-md-row justify-content-between gap-2"><span class="fw-bold">Swollen Hippo Industries</span><span>Built for makers. Made close to home. <span aria-hidden="true">©</span> <span id="year"></span></span></div></footer>
+  <div class="modal fade" id="auth-modal" tabindex="-1" aria-labelledby="auth-modal-title" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content surface"><div class="modal-header border-0 pb-0"><h2 class="modal-title h4 fw-bold" id="auth-modal-title">Log in</h2><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div><div class="modal-body pt-2"><form id="login-form"><div class="mb-3"><label for="login-email" class="form-label fw-semibold">Email</label><input class="form-control" id="login-email" type="email" autocomplete="username" required></div><div class="mb-3"><label for="login-password" class="form-label fw-semibold">Password</label><input class="form-control" id="login-password" type="password" autocomplete="current-password" required></div><button class="btn btn-earth rounded-pill px-4" type="submit">Log in</button><button class="btn btn-link" type="button" data-auth-mode="register">Create account</button></form><form id="register-form" hidden><div class="row g-3"><div class="col-sm-6"><label for="register-first-name" class="form-label fw-semibold">First name</label><input class="form-control" id="register-first-name" autocomplete="given-name" required maxlength="120"></div><div class="col-sm-6"><label for="register-last-name" class="form-label fw-semibold">Last name</label><input class="form-control" id="register-last-name" autocomplete="family-name" required maxlength="120"></div><div class="col-12"><label for="register-email" class="form-label fw-semibold">Email</label><input class="form-control" id="register-email" type="email" autocomplete="email" required maxlength="254"></div><div class="col-12"><label for="register-password" class="form-label fw-semibold">Password</label><input class="form-control" id="register-password" type="password" autocomplete="new-password" required minlength="10" maxlength="72"><div class="form-text">Use at least 10 characters.</div></div><div class="col-12"><button class="btn btn-earth rounded-pill px-4" type="submit">Create customer account</button><button class="btn btn-link" type="button" data-auth-mode="login">I already have an account</button></div></div></form><p class="small mt-3 mb-0" id="auth-message" aria-live="polite"></p></div></div></div></div>
   <div class="toast-container position-fixed bottom-0 end-0 p-3" aria-live="polite" aria-atomic="true"><div id="notice-toast" class="toast" role="status"><div class="toast-body d-flex align-items-center gap-2"><i class="bi bi-check-circle-fill text-success" aria-hidden="true"></i><span id="notice-text"></span><button type="button" class="btn-close ms-auto" data-bs-dismiss="toast" aria-label="Close"></button></div></div></div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script>
     'use strict';
     const strApi = '/api';
     const arrStages = ['Pending', 'In Production', 'Quality Check', 'Shipped', 'Completed'];
-    const objApp = { role: 'landing' };
+    const objApp = { user: null };
     const elAppView = document.getElementById('app-view');
-    const elRoleToggle = document.getElementById('role-toggle');
-    const strDemoAdminNotice = 'Role preview only: this demo uses a client supplied role header. Add real identity and authorization before deployment.';
+    const elAuthModal = document.getElementById('auth-modal');
+    const objAuthModal = bootstrap.Modal.getOrCreateInstance(elAuthModal);
     document.getElementById('year').textContent = new Date().getFullYear();
 
     function escapeHtml(strValue) {
@@ -71,32 +76,116 @@
     function customerJobCard(objJob) {
       return `<article class="job-card p-3 p-md-4 mb-3"><div class="d-flex flex-wrap justify-content-between gap-2 align-items-start"><div><span class="small text-secondary">JOB ${escapeHtml(objJob.id.slice(0,8).toUpperCase())}</span><h3 class="h5 fw-bold mb-1">${escapeHtml(objJob.service)}</h3><p class="text-secondary mb-0">${escapeHtml(objJob.company)}</p></div><span class="tag">${escapeHtml(objJob.status)}</span></div>${makeStepper(objJob.status)}<div class="row g-3 border-top pt-3"><div class="col-sm-6"><span class="small text-secondary d-block">Estimated completion</span><strong>${formatDate(objJob.estimated_completion_date)}</strong></div><div class="col-sm-6"><span class="small text-secondary d-block">Estimated shipping</span><strong>${formatDate(objJob.estimated_shipping_date)}</strong></div></div></article>`;
     }
-    async function fetchJobs(strRole) {
-      const objResponse = await fetch(`${strApi}/jobs?role=${encodeURIComponent(strRole)}`, {headers:{'X-User-Role':strRole}});
+    async function fetchJobs() {
+      const objResponse = await fetch(`${strApi}/jobs`);
       if (!objResponse.ok) throw new Error(`Could not load jobs (${objResponse.status}).`);
       return objResponse.json();
     }
     async function customerView() {
-      elAppView.innerHTML = `<section class="dashboard-shell section-pad"><div class="container"><div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="eyebrow mb-2">Customer workspace</p><h1 class="section-title display-6 mb-1">Your project progress</h1><p class="text-secondary mb-0">A clear view of what’s moving through the shop.</p></div><span class="status-live"><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Live project status</span></div><div id="customer-jobs" aria-live="polite"><div class="surface p-4">Loading your projects…</div></div><p class="small text-secondary mt-3">Demo view: displays all active prototype jobs. Sign-in and customer-specific access require a production identity system.</p></div></section>`;
-      try {const objData = await fetchJobs('customer');const elTarget = document.getElementById('customer-jobs');elTarget.innerHTML = objData.jobs.length ? objData.jobs.map(customerJobCard).join('') : `<div class="surface p-5 text-center"><div class="service-icon mx-auto mb-3"><i class="bi bi-inboxes" aria-hidden="true"></i></div><h2 class="h4 fw-bold">No active projects yet</h2><p class="text-secondary">When you share a project idea, its progress will show up here.</p><button class="btn btn-earth rounded-pill" type="button" data-role="landing">Start an inquiry</button></div>`;} catch(objError) {document.getElementById('customer-jobs').innerHTML = `<div class="alert alert-danger" role="alert">${escapeHtml(objError.message)}</div>`;}
+      elAppView.innerHTML = `<section class="dashboard-shell section-pad"><div class="container"><div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="eyebrow mb-2">Customer workspace</p><h1 class="section-title display-6 mb-1">Your project progress</h1><p class="text-secondary mb-0">A clear view of what’s moving through the shop.</p></div><span class="status-live"><i class="bi bi-arrow-repeat me-1" aria-hidden="true"></i>Live project status</span></div><div id="customer-jobs" aria-live="polite"><div class="surface p-4">Loading your projects…</div></div></div></section>`;
+      try {const objData = await fetchJobs();const elTarget = document.getElementById('customer-jobs');elTarget.innerHTML = objData.jobs.length ? objData.jobs.map(customerJobCard).join('') : `<div class="surface p-5 text-center"><div class="service-icon mx-auto mb-3"><i class="bi bi-inboxes" aria-hidden="true"></i></div><h2 class="h4 fw-bold">No active projects yet</h2><p class="text-secondary">When you share a project idea, its progress will show up here.</p><button class="btn btn-earth rounded-pill" type="button" data-view="landing">Start an inquiry</button></div>`;} catch(objError) {document.getElementById('customer-jobs').innerHTML = `<div class="alert alert-danger" role="alert">${escapeHtml(objError.message)}</div>`;}
     }
     function adminJobCard(objJob) {
       return `<article class="job-card p-3 p-lg-4 mb-3" data-job-id="${escapeHtml(objJob.id)}"><div class="row g-3 align-items-end"><div class="col-lg-4"><span class="small text-secondary">JOB ${escapeHtml(objJob.id.slice(0,8).toUpperCase())}</span><h3 class="h5 fw-bold mb-1">${escapeHtml(objJob.service)}</h3><p class="mb-1">${escapeHtml(objJob.customer_name)} · ${escapeHtml(objJob.company)}</p><a href="mailto:${escapeHtml(objJob.email)}">${escapeHtml(objJob.email)}</a><p class="small text-secondary mt-2 mb-0">${escapeHtml(objJob.project_details)}</p></div><div class="col-sm-4 col-lg-2"><label class="form-label small fw-semibold" for="status-${escapeHtml(objJob.id)}">Stage</label><select class="form-select form-select-sm job-status" id="status-${escapeHtml(objJob.id)}">${arrStages.map(strStage => `<option${strStage === objJob.status ? ' selected' : ''}>${strStage}</option>`).join('')}</select></div><div class="col-sm-4 col-lg-2"><label class="form-label small fw-semibold" for="completion-${escapeHtml(objJob.id)}">Est. completion</label><input class="form-control form-control-sm job-completion" id="completion-${escapeHtml(objJob.id)}" type="date" value="${escapeHtml(objJob.estimated_completion_date || '')}"></div><div class="col-sm-4 col-lg-2"><label class="form-label small fw-semibold" for="shipping-${escapeHtml(objJob.id)}">Est. shipping</label><input class="form-control form-control-sm job-shipping" id="shipping-${escapeHtml(objJob.id)}" type="date" value="${escapeHtml(objJob.estimated_shipping_date || '')}"></div><div class="col-lg-2"><button class="btn btn-earth btn-sm rounded-pill w-100 save-job" type="button"><i class="bi bi-save me-1" aria-hidden="true"></i>Save update</button><div class="small text-success mt-1 save-result" aria-live="polite"></div></div></div></article>`;
     }
     async function adminView() {
-      elAppView.innerHTML = `<section class="dashboard-shell section-pad"><div class="container"><div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="eyebrow mb-2">Production desk</p><h1 class="section-title display-6 mb-1">Inquiry &amp; job board</h1><p class="text-secondary mb-0">Review project requests and keep delivery plans current.</p></div><span class="badge rounded-pill text-bg-warning">${escapeHtml(strDemoAdminNotice)}</span></div><div id="admin-jobs" aria-live="polite"><div class="surface p-4">Loading inquiries…</div></div></div></section>`;
-      try {const objData = await fetchJobs('admin');const elTarget = document.getElementById('admin-jobs');if (!objData.jobs.length) {elTarget.innerHTML = `<div class="surface p-5 text-center"><h2 class="h4">No inquiries yet</h2><p class="text-secondary mb-0">Submitted project inquiries will appear here.</p></div>`;return;}elTarget.innerHTML = `<p class="small text-secondary">${objData.jobs.length} project${objData.jobs.length === 1 ? '' : 's'} · updates save directly to the API</p>${objData.jobs.map(adminJobCard).join('')}`;} catch(objError) {document.getElementById('admin-jobs').innerHTML = `<div class="alert alert-danger" role="alert">${escapeHtml(objError.message)}</div>`;}
+      elAppView.innerHTML = `<section class="dashboard-shell section-pad"><div class="container"><div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4"><div><p class="eyebrow mb-2">Production desk</p><h1 class="section-title display-6 mb-1">Inquiry &amp; job board</h1><p class="text-secondary mb-0">Review project requests and keep delivery plans current.</p></div></div><div id="admin-jobs" aria-live="polite"><div class="surface p-4">Loading inquiries…</div></div></div></section>`;
+      try {const objData = await fetchJobs();const elTarget = document.getElementById('admin-jobs');if (!objData.jobs.length) {elTarget.innerHTML = `<div class="surface p-5 text-center"><h2 class="h4">No inquiries yet</h2><p class="text-secondary mb-0">Submitted project inquiries will appear here.</p></div>`;return;}elTarget.innerHTML = `<p class="small text-secondary">${objData.jobs.length} project${objData.jobs.length === 1 ? '' : 's'} · updates save directly to the API</p>${objData.jobs.map(adminJobCard).join('')}`;} catch(objError) {document.getElementById('admin-jobs').innerHTML = `<div class="alert alert-danger" role="alert">${escapeHtml(objError.message)}</div>`;}
     }
-    function showView(strRole) {
-      objApp.role = strRole;
-      if (strRole === 'customer') customerView();
-      else if (strRole === 'admin') adminView();
-      else elAppView.innerHTML = landingView();
+    function updateAuthControls() {
+      const boolLoggedIn = Boolean(objApp.user);
+      document.getElementById('login-open').hidden = boolLoggedIn;
+      document.getElementById('register-open').hidden = boolLoggedIn;
+      document.getElementById('dashboard-link').hidden = !boolLoggedIn;
+      document.getElementById('logout-button').hidden = !boolLoggedIn;
+      document.getElementById('signed-in-label').hidden = !boolLoggedIn;
+      document.getElementById('signed-in-name').textContent = boolLoggedIn ? `${objApp.user.first_name} ${objApp.user.last_name}` : '';
+    }
+    function setAuthMode(strMode) {
+      const boolRegister = strMode === 'register';
+      document.getElementById('login-form').hidden = boolRegister;
+      document.getElementById('register-form').hidden = !boolRegister;
+      document.getElementById('auth-modal-title').textContent = boolRegister ? 'Create your account' : 'Log in';
+      const elMessage = document.getElementById('auth-message');
+      elMessage.textContent = '';
+      elMessage.className = 'small mt-3 mb-0';
+    }
+    function showView(strView = 'landing') {
+      if (strView === 'dashboard') {
+        if (!objApp.user) {setAuthMode('login');objAuthModal.show();return;}
+        if (objApp.user.is_admin) adminView(); else customerView();
+      } else {
+        elAppView.innerHTML = landingView();
+      }
       window.scrollTo({top:0,behavior:window.matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});
     }
-    elRoleToggle.addEventListener('change', () => showView(elRoleToggle.value));
-    document.getElementById('brand-home').addEventListener('click', (objEvent) => {objEvent.preventDefault();elRoleToggle.value='landing';showView('landing');});
-    document.addEventListener('click', (objEvent) => {const elRoleButton = objEvent.target.closest('[data-role]');if(elRoleButton){elRoleToggle.value=elRoleButton.dataset.role;showView(elRoleButton.dataset.role);}});
+    document.getElementById('brand-home').addEventListener('click', (objEvent) => {objEvent.preventDefault();showView('landing');});
+    document.getElementById('dashboard-link').addEventListener('click', () => showView('dashboard'));
+    document.getElementById('login-open').addEventListener('click', () => {setAuthMode('login');objAuthModal.show();});
+    document.getElementById('register-open').addEventListener('click', () => {setAuthMode('register');objAuthModal.show();});
+    document.addEventListener('click', (objEvent) => {const elAuthMode = objEvent.target.closest('[data-auth-mode]');if(elAuthMode)setAuthMode(elAuthMode.dataset.authMode);const elViewButton = objEvent.target.closest('[data-view]');if(elViewButton)showView(elViewButton.dataset.view);});
+    document.getElementById('login-form').addEventListener('submit', async (objEvent) => {
+      objEvent.preventDefault();
+      const elMessage = document.getElementById('auth-message');
+      try {
+        const objResponse = await fetch(`${strApi}/auth/login`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:document.getElementById('login-email').value,password:document.getElementById('login-password').value})});
+        const objData = await objResponse.json();
+        if (!objResponse.ok) throw new Error(objData.detail || 'Could not log in.');
+        objApp.user = objData;
+        updateAuthControls();
+        objEvent.target.reset();
+        objAuthModal.hide();
+        showView('dashboard');
+      } catch(objError) {
+        elMessage.className = 'small mt-3 mb-0 text-danger';
+        elMessage.textContent = objError.message;
+      }
+    });
+    document.getElementById('register-form').addEventListener('submit', async (objEvent) => {
+      objEvent.preventDefault();
+      const elMessage = document.getElementById('auth-message');
+      const strEmail = document.getElementById('register-email').value;
+      try {
+        const objResponse = await fetch(`${strApi}/auth/register`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({first_name:document.getElementById('register-first-name').value,last_name:document.getElementById('register-last-name').value,email:strEmail,password:document.getElementById('register-password').value})});
+        const objData = await objResponse.json();
+        if (!objResponse.ok) throw new Error(objData.detail || 'Could not create the account.');
+        objEvent.target.reset();
+        setAuthMode('login');
+        document.getElementById('login-email').value = strEmail;
+        elMessage.className = 'small mt-3 mb-0 text-success';
+        elMessage.textContent = 'Account created. Log in to see your project dashboard.';
+      } catch(objError) {
+        elMessage.className = 'small mt-3 mb-0 text-danger';
+        elMessage.textContent = objError.message;
+      }
+    });
+    document.getElementById('logout-button').addEventListener('click', async () => {
+      try {
+        await fetch(`${strApi}/auth/logout`, {method:'POST'});
+        objApp.user = null;
+        updateAuthControls();
+        showView('landing');
+      } catch(objError) {
+        setAuthMode('login');
+        document.getElementById('auth-message').textContent = 'Could not log out. Please try again.';
+        document.getElementById('auth-message').classList.add('text-danger');
+        objAuthModal.show();
+      }
+    });
+    async function restoreSession() {
+      try {
+        const objResponse = await fetch(`${strApi}/auth/me`);
+        if (objResponse.ok) {
+          objApp.user = await objResponse.json();
+          updateAuthControls();
+          showView('dashboard');
+          return;
+        }
+      } catch(objError) {
+        // Keep the public landing page usable while the session check fails.
+      }
+      updateAuthControls();
+    }
     document.addEventListener('submit', async (objEvent) => {
       if (objEvent.target.id !== 'inquiry-form') return;
       objEvent.preventDefault();
@@ -116,11 +205,12 @@
       const elCard = elSave.closest('[data-job-id]');const strJobId = elCard.dataset.jobId;const elResult=elCard.querySelector('.save-result');
       const objPayload={status:elCard.querySelector('.job-status').value,estimated_completion_date:elCard.querySelector('.job-completion').value||null,estimated_shipping_date:elCard.querySelector('.job-shipping').value||null};
       elSave.disabled=true;elResult.textContent='Saving…';
-      try{const objResponse=await fetch(`${strApi}/jobs/${encodeURIComponent(strJobId)}`,{method:'PUT',headers:{'Content-Type':'application/json','X-User-Role':'admin'},body:JSON.stringify(objPayload)});const objData=await objResponse.json();if(!objResponse.ok)throw new Error(objData.detail||'Update failed');elResult.textContent='Saved';elResult.className='small text-success mt-1 save-result';}
+      try{const objResponse=await fetch(`${strApi}/jobs/${encodeURIComponent(strJobId)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(objPayload)});const objData=await objResponse.json();if(!objResponse.ok)throw new Error(objData.detail||'Update failed');elResult.textContent='Saved';elResult.className='small text-success mt-1 save-result';}
       catch(objError){elResult.textContent=objError.message;elResult.className='small text-danger mt-1 save-result';}
       finally{elSave.disabled=false;}
     });
     showView('landing');
+    restoreSession();
   </script>
 </body>
 </html>

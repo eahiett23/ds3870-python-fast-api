@@ -32,17 +32,14 @@ A **session ID kept in an HttpOnly cookie**. The server remembers each session i
 - The old `X-User-Role` header no longer gives any access.
 
 ## What changed in the repo
-New files:
-- `auth.py` - the login routes and two checks other code can use
-- `create_staff.py` - makes an admin account
-- `auth_sessions.sql` - the sessions table for production mode only
-- `AUTH.md` - this file
-- `pytest.ini`, `tests/` - automated tests
-
-Small changes to existing files:
-- `database.py` - added the `sessions` table
-- `main.py` - added the auth routes, and the job routes now use the login instead of the role header
-- `templates/index.html` - the role dropdown is replaced by Log in / Sign up / Log out, with Bootstrap forms
+- `auth.py` - login routes and session-based authorization checks
+- `database.py` - user/session tables and demo/production database setup
+- `create_staff.py` - creates an admin account
+- `auth_sessions.sql` - adds the sessions table to an existing production users database
+- `pytest.ini`, `tests/` - automated endpoint tests
+- `main.py` - mounts auth routes; customer job access is scoped to the signed-in email
+- `templates/index.html` - provides Log in / Sign up / Log out controls
+- `requirements.txt` - lists the runtime and test dependencies
 
 ## For teammates
 To protect another route, call one of these inside it:
@@ -56,7 +53,7 @@ auth.require_admin(obj_request)                  # admin only
 2. In `.env`, set `CONNECTIONSTRING` as before. Set `COOKIE_SECURE=true` when the site runs on https.
 3. Make an admin: `python create_staff.py`
 4. Start the app as usual.
-5. In production mode only: run `auth_sessions.sql` once in the production database.
+5. In production mode only: run `auth_sessions.sql` once in the production database. The existing database must already have the `users` table described by `database.py`.
 
 ## Tests
 Run `python -m pytest -v` from the project folder.
@@ -70,5 +67,5 @@ They do not prove MySQL or MariaDB works, so also try the app once by hand on th
 - There is no limit on wrong password tries.
 - Logging in with an email that does not exist is a little faster than a wrong password, so the timing could show which emails have accounts.
 - Protection against forged requests relies on `SameSite=Lax` only.
-- Production mode: `production/api.py` still has its own job checks. It should call `auth.get_current_user` and `auth.require_admin` too.
-- `templates/index.html` still sends an `X-User-Role` header in two places. Demo mode ignores it. Delete those two lines once `production/api.py` no longer reads it.
+- Job and inquiry records remain in memory to match the prototype requirements; they are cleared when the server restarts. User accounts and sessions are stored in the configured database.
+- Customer accounts are not email-verified, so a person could register another person's email and view inquiries attached to it. Add an email verification flow before real customer data is used.

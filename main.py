@@ -5,11 +5,16 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, EmailStr, Field
 
+import auth
+from database import initialize_database
+
 app = FastAPI(title="Swollen Hippo Industries", version="1.0.0")
+app.state.obj_engine = initialize_database()
+app.include_router(auth.obj_router)
 _template_path = Path(__file__).parent / "templates" / "index.html"
 
 _STAGES = ["Pending", "In Production", "Quality Check", "Shipped", "Completed"]
@@ -63,27 +68,28 @@ async def create_inquiry(payload: Inquiry) -> dict:
 
 @app.get("/api/jobs")
 async def list_jobs(
-    role: Literal["customer", "admin"] = Query(default="customer"),
-    x_user_role: str | None = Header(default=None),
+    obj_request: Request,
 ) -> dict:
-    """Return jobs visible to the selected demo role."""
-    if role == "admin" and x_user_role != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-    lst_jobs = _jobs if role == "admin" else [
-        dict_job for dict_job in _jobs if dict_job["status"] != "Completed"
+    """Return all jobs to staff or only this customer's active jobs."""
+    dict_user = auth.get_current_user(obj_request)
+    if dict_user["is_admin"]:
+        return {"jobs": _jobs, "inquiries": _inquiries}
+    lst_jobs = [
+        dict_job for dict_job in _jobs
+        if dict_job["email"].lower() == dict_user["email"].lower()
+        and dict_job["status"] != "Completed"
     ]
-    return {"jobs": lst_jobs, "inquiries": _inquiries if role == "admin" else []}
+    return {"jobs": lst_jobs, "inquiries": []}
 
 
 @app.put("/api/jobs/{job_id}")
 async def update_job(
     job_id: str,
     payload: JobUpdate,
-    x_user_role: str | None = Header(default=None),
+    obj_request: Request,
 ) -> dict:
-    """Update job stage and schedule; the demo admin role is supplied by header."""
-    if x_user_role != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
+    """Update job stage and dates; only a staff session may write updates."""
+    auth.require_admin(obj_request)
     dict_job = next((job for job in _jobs if job["id"] == job_id), None)
     if dict_job is None:
         raise HTTPException(status_code=404, detail="Job not found")
