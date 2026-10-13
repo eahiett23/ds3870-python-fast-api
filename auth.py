@@ -334,9 +334,3 @@ def logout(obj_request: Request, obj_response: Response) -> dict:
 @obj_router.get("/me")
 def me(obj_request: Request) -> dict:
     return get_current_user(obj_request)
-
-
-
-@obj_router.get("/me")
-def me(obj_request: Request) -> dict:
-    return get_current_user(obj_request)
