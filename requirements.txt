@@ -8,3 +8,4 @@ PyMySQL>=1.1,<2
 argon2-cffi>=23.1
 alembic>=1.13,<2
 python-dotenv>=1.0,<2.0
+bcrypt>=4,<6
