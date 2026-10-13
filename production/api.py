@@ -7,9 +7,10 @@ import secrets
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerificationError, InvalidHashError
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.exc import StaleDataError
 from .models import User, UserSession, Inquiry, Job, JobMilestone, STAGES
@@ -37,17 +38,17 @@ def require_production(obj_request):
 
 
 def authenticate(obj_request, obj_session, bool_optional=False):
-    str_header = obj_request.headers.get('authorization', '')
-    if not str_header and bool_optional:
+    str_token = obj_request.cookies.get('session_token')
+    if not str_token and bool_optional:
         return None
-    if not str_header.startswith('Bearer ') or len(str_header) > 200:
-        raise HTTPException(401, 'Sign in required', headers={'WWW-Authenticate': 'Bearer'})
-    obj_digest = hashlib.sha256(str_header[7:].encode()).digest()
+    if not str_token or len(str_token) != 43:
+        raise HTTPException(401, 'Sign in required')
+    obj_digest = hashlib.sha256(str_token.encode()).digest()
     obj_user = obj_session.scalar(select(User).join(UserSession).where(
         UserSession.token_digest == obj_digest, UserSession.revoked_at.is_(None),
         UserSession.expires_at > utc_now(), User.is_active == 1))
     if obj_user is None:
-        raise HTTPException(401, 'Session invalid or expired', headers={'WWW-Authenticate': 'Bearer'})
+        raise HTTPException(401, 'Session invalid or expired')
     return obj_user
 
 
@@ -103,8 +104,7 @@ def configuration(obj_request: Request):
     return {'mode': 'production' if obj_request.app.state.bool_production else 'demo', 'stages': list(STAGES) if obj_request.app.state.bool_production else ['Pending', 'In Production', 'Quality Check', 'Shipped', 'Completed']}
 
 
-@obj_router.post('/api/auth/login')
-def login(payload: Login, obj_request: Request):
+def login(payload: Login, obj_request: Request, obj_response: Response):
     require_production(obj_request)
     with Session(obj_request.app.state.obj_engine) as obj_session, obj_session.begin():
         obj_user = obj_session.scalar(select(User).where(User.email == str(payload.email).strip().lower()))
@@ -116,16 +116,58 @@ def login(payload: Login, obj_request: Request):
             raise HTTPException(401, 'Invalid email or password')
         str_token = secrets.token_urlsafe(32)
         obj_session.add(UserSession(user_id=obj_user.id, token_digest=hashlib.sha256(str_token.encode()).digest(), expires_at=utc_now()+timedelta(hours=8)))
-        return {'access_token': str_token, 'token_type': 'bearer', 'expires_in': 28800, 'role': obj_user.role}
+        from auth import bool_cookie_secure
+        str_old_token = obj_request.cookies.get('session_token')
+        if str_old_token:
+            obj_old = obj_session.scalar(select(UserSession).where(UserSession.token_digest == hashlib.sha256(str_old_token.encode()).digest()))
+            if obj_old:
+                obj_old.revoked_at = utc_now()
+        obj_response.set_cookie('session_token', str_token, httponly=True,
+                                secure=bool_cookie_secure, samesite='lax', path='/', max_age=28800)
+        return serialize_user(obj_user)
 
 
-@obj_router.post('/api/auth/logout')
-def logout(obj_request: Request):
+def serialize_user(obj_user):
+    return {'email': obj_user.email, 'first_name': obj_user.first_name,
+            'last_name': obj_user.last_name, 'role': obj_user.role,
+            'is_admin': obj_user.role == 'admin'}
+
+
+def register(payload, obj_request):
     require_production(obj_request)
-    with Session(obj_request.app.state.obj_engine) as obj_session, obj_session.begin():
-        authenticate(obj_request, obj_session)
-        obj_record = obj_session.scalar(select(UserSession).where(UserSession.token_digest == hashlib.sha256(obj_request.headers['authorization'][7:].encode()).digest()))
-        obj_record.revoked_at = utc_now()
+    str_first = payload.first_name.strip()
+    str_last = payload.last_name.strip()
+    if not str_first or not str_last:
+        raise HTTPException(400, 'Enter your first and last name')
+    str_hash = obj_hasher.hash(payload.password)
+    try:
+        with Session(obj_request.app.state.obj_engine) as obj_session, obj_session.begin():
+            obj_session.add(User(email=str(payload.email).strip().lower(),
+                                 first_name=str_first, last_name=str_last,
+                                 password_hash=str_hash, role='customer', is_active=1))
+    except IntegrityError:
+        raise HTTPException(400, 'Could not create account') from None
+    return {'message': 'Account created'}
+
+
+def me(obj_request):
+    require_production(obj_request)
+    with Session(obj_request.app.state.obj_engine) as obj_session:
+        return serialize_user(authenticate(obj_request, obj_session))
+
+
+def logout(obj_request: Request, obj_response: Response):
+    require_production(obj_request)
+    str_token = obj_request.cookies.get('session_token')
+    if str_token:
+        with Session(obj_request.app.state.obj_engine) as obj_session, obj_session.begin():
+            obj_record = obj_session.scalar(select(UserSession).where(
+                UserSession.token_digest == hashlib.sha256(str_token.encode()).digest()))
+            if obj_record:
+                obj_record.revoked_at = utc_now()
+    from auth import bool_cookie_secure
+    obj_response.delete_cookie('session_token', path='/', secure=bool_cookie_secure,
+                               httponly=True, samesite='lax')
     return {'message': 'Signed out'}
 
 
@@ -144,9 +186,9 @@ def create_inquiry(payload, obj_request):
             # Existing frontend sends budget ranges. Preserve them verbatim, not as invented amounts.
             pass
     with Session(obj_request.app.state.obj_engine) as obj_session, obj_session.begin():
-        obj_user = authenticate(obj_request, obj_session, bool_optional=True)
+        obj_user = authenticate(obj_request, obj_session)
         obj_inquiry = Inquiry(customer_id=obj_user.id if obj_user and obj_user.role == 'customer' else None,
-            contact_name=payload.customer_name, contact_email=str(payload.email).strip().lower(),
+            contact_name=f'{obj_user.first_name} {obj_user.last_name}', contact_email=obj_user.email,
             company_name=payload.company, inquiry_type=str_service,
             description=payload.project_details + (f'\nBudget preference: {str_budget}' if str_budget and obj_budget is None else ''), target_budget=obj_budget)
         obj_session.add(obj_inquiry)
@@ -281,3 +323,4 @@ def add_milestone(job_id: str, payload: MilestoneNote, obj_request: Request):
             obj_record = JobMilestone(job_id=obj_job.id, admin_id=obj_user.id, stage=obj_job.status, progress_percentage=obj_job.progress_percentage, note=payload.note)
             obj_session.add(obj_record)
         return {'message': 'Note added', 'milestone_id': obj_record.id}
+
