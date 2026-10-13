@@ -32,6 +32,7 @@ async def app_lifespan(obj_app: FastAPI):
 
 
 app = FastAPI(title="Swollen Hippo Industries", version="1.0.0", lifespan=app_lifespan)
+auth.install_auth_security(app)
 app.include_router(production_api.obj_router)
 _template_path = Path(__file__).parent / "templates" / "index.html"
 
