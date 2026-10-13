@@ -1,28 +1,54 @@
 'use strict';
-// Production sessions remain in memory; refreshing the page requires sign-in.
-objApp.token = null;
+// Session tokens stay in HttpOnly cookies.
+objApp.user = null;
+objApp.authEnabled = false;
 objApp.production = false;
 function authHeaders() {
-  return objApp.token ? {Authorization: `Bearer ${objApp.token}`} : {};
+  return {};
 }
 async function productionRequest(strPath, objOptions = {}) {
   const objResponse = await fetch(`/api${strPath}`, {...objOptions, headers: {'Content-Type':'application/json', ...authHeaders(), ...objOptions.headers}});
-  const objData = await objResponse.json();
+  const objData = await objResponse.json().catch(() => ({detail: objResponse.status === 429 ? 'Too many attempts. Try again later.' : 'Request failed. Try again.'}));
   if (!objResponse.ok) {
-    if (objResponse.status === 401) {objApp.token = null; objApp.accountRole = null;}
-    throw new Error(typeof objData.detail === 'string' ? objData.detail : 'Request failed. Check the supplied values.');
+    if (objResponse.status === 401) {
+      objApp.user = null; objApp.accountRole = null;
+      const elAccount = document.getElementById('account-button');
+      const elWorkspace = document.getElementById('workspace-button');
+      if (elAccount) elAccount.textContent = 'Sign in';
+      if (elWorkspace) elWorkspace.hidden = true;
+    }
+    const objError = new Error(typeof objData.detail === 'string' ? objData.detail : 'Request failed. Check the supplied values.');
+    objError.status = objResponse.status;
+    throw objError;
   }
   return objData;
 }
 function signInView() {
-  elAppView.innerHTML = `<section class="section-pad"><div class="container" style="max-width:520px"><h1 class="h2">Sign in</h1><form id="login-form"><label class="form-label" for="login-email">Email</label><input id="login-email" name="email" type="email" class="form-control mb-3" autocomplete="username" required><label class="form-label" for="login-password">Password</label><input id="login-password" name="password" type="password" class="form-control mb-3" autocomplete="current-password" required><button class="btn btn-earth" type="submit">Sign in</button><p id="login-message" role="status" class="mt-3"></p></form></div></section>`;
+  elAppView.innerHTML = `<section class="section-pad"><div class="container" style="max-width:520px"><h1 class="h2">Sign in</h1><form id="login-form"><label class="form-label" for="login-email">Email</label><input id="login-email" name="email" type="email" class="form-control mb-3" autocomplete="username" required><label class="form-label" for="login-password">Password</label><input id="login-password" name="password" type="password" class="form-control mb-3" autocomplete="current-password" required><button class="btn btn-earth" type="submit">Sign in</button><p id="login-message" role="status" class="mt-3"></p></form><button type="button" class="btn btn-link" id="register-button">Create account</button></div></section>`;
+  document.getElementById("register-button").addEventListener("click", registerView);
+}
+function setAccount(objUser) {
+  objApp.user = objUser;
+  objApp.accountRole = objUser.role || (objUser.is_admin ? 'admin' : 'customer');
+  document.getElementById('account-button').textContent = 'Sign out';
+  document.getElementById('workspace-button').hidden = false;
+}
+function registerView() {
+  elAppView.innerHTML = `<section class="section-pad"><div class="container" style="max-width:520px"><h1 class="h2">Create account</h1><form id="register-form">
+    <label class="form-label" for="register-first">First name</label><input id="register-first" name="first_name" class="form-control mb-3" autocomplete="given-name" maxlength="120" required>
+    <label class="form-label" for="register-last">Last name</label><input id="register-last" name="last_name" class="form-control mb-3" autocomplete="family-name" maxlength="120" required>
+    <label class="form-label" for="register-email">Email</label><input id="register-email" name="email" type="email" class="form-control mb-3" autocomplete="email" required>
+    <label class="form-label" for="register-password">Password</label><input id="register-password" name="password" type="password" class="form-control mb-3" autocomplete="new-password" minlength="10" maxlength="72" required>
+    <p>Use at least 10 characters.</p><button class="btn btn-earth" type="submit">Create account</button><p id="register-message" role="status" class="mt-3"></p></form>
+    <button type="button" class="btn btn-link" id="back-login">Sign in</button></div></section>`;
+  document.getElementById('back-login').addEventListener('click', signInView);
 }
 async function initializeProduction() {
   elRoleToggle.disabled = true;
   try {
     const objConfig = await productionRequest('/config');
-    if (objConfig.mode !== 'production') {elRoleToggle.disabled = false; return;}
-    objApp.production = true;
+    objApp.production = objConfig.mode === 'production';
+    objApp.authEnabled = true;
     arrStages.splice(0, arrStages.length, ...objConfig.stages);
     elRoleToggle.parentElement.hidden = true;
     const elAccount = document.createElement('li');
@@ -30,17 +56,20 @@ async function initializeProduction() {
     elAccount.innerHTML = '<button id="account-button" class="btn btn-outline-earth" type="button">Sign in</button><button id="workspace-button" class="btn btn-earth ms-2" type="button" hidden>My workspace</button>';
     elRoleToggle.parentElement.after(elAccount);
     document.getElementById('account-button').addEventListener('click', async () => {
-      if (!objApp.token) {signInView(); return;}
-      try {await productionRequest('/auth/logout', {method:'POST'});} catch (objError) {document.getElementById('notice-text').textContent = objError.message;}
-      objApp.token = null; objApp.accountRole = null;
+      if (!objApp.user) {signInView(); return;}
+      try {await productionRequest('/auth/logout', {method:'POST'});} catch (objError) {document.getElementById('notice-text').textContent = objError.message; return;}
+      objApp.user = null; objApp.accountRole = null;
       document.getElementById('account-button').textContent = 'Sign in';
       document.getElementById('workspace-button').hidden = true;
       showView('landing');
     });
     document.getElementById('workspace-button').addEventListener('click', () => showView(objApp.accountRole));
+    fetchJobs = strRole => productionRequest(`/jobs?role=${encodeURIComponent(strRole)}`);
+    try {setAccount(await productionRequest('/auth/me'));}
+    catch (objError) {if (objError.status !== 401) throw objError;}
+    if (!objApp.production) {showView(objApp.accountRole || 'landing'); return;}
     const fnLanding = landingView;
     landingView = () => fnLanding().replace('<option>Additive &amp; Subtractive Manufacturing</option>', '<option>3D Printing</option><option>CNC Machining</option>').replace('<option>Not sure yet</option>', '');
-    fetchJobs = strRole => productionRequest(`/jobs?role=${encodeURIComponent(strRole)}`);
     const fnCustomerCard = customerJobCard;
     customerJobCard = objJob => fnCustomerCard(objJob).replace('</article>', `<div class="mt-3"><strong>${objJob.progress_percentage}% complete</strong><p class="mb-1">${escapeHtml(objJob.carrier_name || '')} ${escapeHtml(objJob.tracking_number || '')}</p>${objJob.tracking_url?.startsWith('https://') ? `<a href="${escapeHtml(objJob.tracking_url)}" target="_blank" rel="noopener noreferrer">Track shipment</a>` : ''}<button class="btn btn-outline-earth btn-sm ms-2 history-button" data-id="${escapeHtml(objJob.id)}" type="button">View timeline</button><div class="job-history mt-2" aria-live="polite"></div></div></article>`);
     const fnCustomerView = customerView;
@@ -65,25 +94,24 @@ async function initializeProduction() {
         document.getElementById('admin-jobs').innerHTML = `<h2 class="h4 mt-4">Inquiries</h2>${objData.inquiries.map(objItem => `<article class="job-card p-3 mb-3"><h3 class="h5">${escapeHtml(objItem.service)} · ${escapeHtml(objItem.customer_name)}</h3><p>${escapeHtml(objItem.email)} · ${escapeHtml(objItem.status)}</p><p>${escapeHtml(objItem.project_details)}</p>${!['converted','rejected'].includes(objItem.status) ? `<form class="conversion-form" data-id="${objItem.id}"><label class="form-label" for="owner-${objItem.id}">Customer account ID</label><input id="owner-${objItem.id}" name="customer_id" class="form-control mb-2" type="number" min="1" value="${objItem.customer_id || ''}" required><label class="form-label" for="title-${objItem.id}">Job title</label><input id="title-${objItem.id}" name="title" class="form-control mb-2" minlength="2" maxlength="240" required><button class="btn btn-earth" type="submit">Create customer job</button><p class="conversion-message mt-2" role="status"></p></form>` : ''}</article>`).join('') || '<p>No inquiries.</p>'}<h2 class="h4 mt-4">Jobs</h2>${objData.jobs.map(adminJobCard).join('') || '<p>No jobs.</p>'}`;
       } catch (objError) {document.getElementById('admin-jobs').textContent = objError.message;}
     };
-    showView('landing');
+    showView(objApp.accountRole || 'landing');
   } catch (objError) {elAppView.textContent = `Unable to load application configuration: ${objError.message}`;}
 }
 document.addEventListener('submit', async objEvent => {
-  if (!objApp.production) return;
+  if (!objApp.authEnabled) return;
   const elForm = objEvent.target;
-  if (elForm.id !== 'login-form' && !elForm.matches('.conversion-form')) return;
+  if (!['login-form', 'register-form'].includes(elForm.id) && !elForm.matches('.conversion-form')) return;
   objEvent.preventDefault();
   const objPayload = Object.fromEntries(new FormData(elForm).entries());
-  const elMessage = elForm.querySelector('#login-message, .conversion-message');
+  const elMessage = elForm.querySelector('#login-message, #register-message, .conversion-message');
   const elSubmit = elForm.querySelector('[type="submit"]');
   elSubmit.disabled = true;
   try {
-    if (elForm.id === 'login-form') {
+    if (elForm.id === 'login-form' || elForm.id === 'register-form') {
+      if (elForm.id === 'register-form') await productionRequest('/auth/register', {method:'POST', body:JSON.stringify(objPayload)});
       const objData = await productionRequest('/auth/login', {method:'POST', body:JSON.stringify(objPayload)});
-      objApp.token = objData.access_token; objApp.accountRole = objData.role;
-      document.getElementById('account-button').textContent = 'Sign out';
-      document.getElementById('workspace-button').hidden = false;
-      showView(objData.role);
+      setAccount(objData);
+      showView(objApp.accountRole);
     } else {
       objPayload.customer_id = Number(objPayload.customer_id);
       await productionRequest(`/inquiries/${elForm.dataset.id}/convert`, {method:'POST', body:JSON.stringify(objPayload)});
