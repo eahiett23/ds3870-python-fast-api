@@ -33,14 +33,18 @@ int_session_hours = 8
 int_bcrypt_rounds = 12
 
 # Secure by default. Set false only for local HTTP development.
-bool_cookie_secure = (
-    os.environ.get("COOKIE_SECURE", "true").lower() == "true"
-)
+str_cookie_secure = os.environ.get("COOKIE_SECURE", "true").lower()
+if str_cookie_secure not in {"true", "false"}:
+    raise RuntimeError("COOKIE_SECURE must be true or false")
+bool_cookie_secure = str_cookie_secure == "true"
 
 str_site_origin = os.environ.get(
     "SITE_ORIGIN",
     "https://swollenhippoindustries.duckdns.org",
 ).rstrip("/")
+
+if str_site_origin.startswith("https://") and not bool_cookie_secure:
+    raise RuntimeError("COOKIE_SECURE must be true for an HTTPS site")
 
 obj_router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -82,7 +86,8 @@ class RegisterBody(BaseModel):
 
 class LoginBody(BaseModel):
     email: str = Field(min_length=1, max_length=254)
-    password: str = Field(min_length=1, max_length=72)
+    # Preserve support for existing production Argon2 passwords.
+    password: str = Field(min_length=1, max_length=1024)
 
 
 def get_utc_now():
@@ -135,6 +140,9 @@ str_dummy_password_hash = hash_password(secrets.token_urlsafe(32))
 
 def get_current_user(obj_request: Request):
     """Return the logged-in user, or raise 401."""
+    if obj_request.app.state.bool_production:
+        from production import api
+        return api.me(obj_request)
     str_token = obj_request.cookies.get(str_cookie_name)
 
     if not str_token:
@@ -178,6 +186,9 @@ def require_admin(obj_request: Request):
 
 @obj_router.post("/register", status_code=201)
 def register(obj_body: RegisterBody, obj_request: Request) -> dict:
+    if obj_request.app.state.bool_production:
+        from production import api
+        return api.register(obj_body, obj_request)
     str_email = str(obj_body.email).strip().lower()
     str_first_name = obj_body.first_name.strip()
     str_last_name = obj_body.last_name.strip()
@@ -221,6 +232,9 @@ def login(
     obj_request: Request,
     obj_response: Response,
 ) -> dict:
+    if obj_request.app.state.bool_production:
+        from production import api
+        return api.login(obj_body, obj_request, obj_response)
     str_email = obj_body.email.strip().lower()
 
     with obj_request.app.state.obj_engine.connect() as obj_connection:
@@ -293,6 +307,9 @@ def login(
 
 @obj_router.post("/logout")
 def logout(obj_request: Request, obj_response: Response) -> dict:
+    if obj_request.app.state.bool_production:
+        from production import api
+        return api.logout(obj_request, obj_response)
     str_token = obj_request.cookies.get(str_cookie_name)
 
     if str_token:
@@ -312,6 +329,12 @@ def logout(obj_request: Request, obj_response: Response) -> dict:
     )
 
     return {"message": "Logged out"}
+
+
+@obj_router.get("/me")
+def me(obj_request: Request) -> dict:
+    return get_current_user(obj_request)
+
 
 
 @obj_router.get("/me")
