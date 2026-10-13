@@ -3,7 +3,7 @@
 import os
 from uuid import uuid4
 
-from sqlalchemy import Boolean, Column, Date, ForeignKey, MetaData, String, Table, create_engine, event, false, inspect, text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, MetaData, String, Table, create_engine, event, false, inspect, text
 from sqlalchemy.engine import Engine
 
 obj_metadata = MetaData()
@@ -15,6 +15,13 @@ tbl_users = Table(
     Column("last_name", String(120), nullable=False),
     Column("is_admin", Boolean, nullable=False, server_default=false()),
     Column("hashed_password", String(1024), nullable=False),
+)
+
+tbl_sessions = Table(
+    "sessions", obj_metadata,
+    Column("token_hash", String(64), primary_key=True),
+    Column("user_email", String(254), ForeignKey("users.email", ondelete="CASCADE"), nullable=False, index=True),
+    Column("expires_at", DateTime, nullable=False),
 )
 
 tbl_inquiries = Table(
@@ -118,3 +125,4 @@ def configure_mysql_connection(obj_connection, obj_connection_record, obj_connec
         obj_cursor.execute('SET @app_actor_id = NULL')
     finally:
         obj_cursor.close()
+
