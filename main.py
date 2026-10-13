@@ -7,16 +7,18 @@ from typing import Literal
 from uuid import uuid4
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import select
 import os
-from production import api as production_api
 
 from database import initialize_database, tbl_inquiries, tbl_jobs
 
 load_dotenv(Path(__file__).with_name(".env"), override=False)
+
+import auth
+from production import api as production_api
 
 
 @asynccontextmanager
@@ -33,6 +35,7 @@ async def app_lifespan(obj_app: FastAPI):
 
 app = FastAPI(title="Swollen Hippo Industries", version="1.0.0", lifespan=app_lifespan)
 auth.install_auth_security(app)
+app.include_router(auth.obj_router)
 app.include_router(production_api.obj_router)
 _template_path = Path(__file__).parent / "templates" / "index.html"
 
@@ -79,6 +82,8 @@ async def create_inquiry(payload: Inquiry, obj_request: Request) -> dict:
     """Save an inquiry and create its initial job record."""
     if obj_request.app.state.bool_production:
         return production_api.create_inquiry(payload, obj_request)
+    dict_user = auth.get_current_user(obj_request)
+    payload = payload.model_copy(update={"email": dict_user["email"], "customer_name": f"{dict_user['first_name']} {dict_user['last_name']}"})
     str_id = str(uuid4())
     str_created = datetime.now(timezone.utc).isoformat()
     dict_inquiry = payload.model_dump(mode="json")
@@ -101,16 +106,16 @@ async def create_inquiry(payload: Inquiry, obj_request: Request) -> dict:
 async def list_jobs(
     obj_request: Request,
     role: Literal["customer", "admin"] = Query(default="customer"),
-    x_user_role: str | None = Header(default=None),
 ) -> dict:
-    """Return jobs visible to the selected demo role."""
+    """Return jobs owned by the signed-in customer, or all jobs to staff."""
     if obj_request.app.state.bool_production:
         return production_api.list_jobs(obj_request, role)
-    if role == "admin" and x_user_role != "admin":
+    dict_user = auth.get_current_user(obj_request)
+    if role == "admin" and not dict_user["is_admin"]:
         raise HTTPException(status_code=403, detail="Admin role required")
     obj_query = select(tbl_jobs)
     if role != "admin":
-        obj_query = obj_query.where(tbl_jobs.c.status != "Completed")
+        obj_query = obj_query.where(tbl_jobs.c.email == dict_user["email"], tbl_jobs.c.status != "Completed")
     lst_inquiries = []
     with obj_request.app.state.obj_engine.connect() as obj_connection:
         lst_jobs = [dict(obj_row) for obj_row in obj_connection.execute(obj_query).mappings()]
@@ -125,15 +130,13 @@ async def update_job(
     job_id: str,
     payload: JobUpdate,
     obj_request: Request,
-    x_user_role: str | None = Header(default=None),
 ) -> dict:
-    """Update job stage and schedule; the demo admin role is supplied by header."""
+    """Update job stage and schedule after checking the admin session."""
     if obj_request.app.state.bool_production:
         return production_api.update_job(job_id, payload, obj_request)
+    auth.require_admin(obj_request)
     if payload.status not in _STAGES:
         raise HTTPException(status_code=422, detail='Unsupported demo stage')
-    if x_user_role != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
     with obj_request.app.state.obj_engine.begin() as obj_connection:
         obj_result = obj_connection.execute(
             tbl_jobs.update().where(tbl_jobs.c.id == job_id).values(**payload.model_dump(include={'status', 'estimated_completion_date', 'estimated_shipping_date'})))
@@ -142,3 +145,4 @@ async def update_job(
         dict_job = dict(obj_connection.execute(
             select(tbl_jobs).where(tbl_jobs.c.id == job_id)).mappings().one())
     return {"message": "Job updated", "job": dict_job}
+
