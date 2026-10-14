@@ -1,4 +1,34 @@
-# Job Intake App
+# Swollen Hippo Industries
+
+## Verified deployed MySQL backend
+
+The Debian service now runs `uvicorn mysql_portal:app` against MySQL 8.4 and
+`swollenhippo_db`. The backend preserves bcrypt passwords, secure cookie login,
+string job IDs, customer ownership, and administrator-only job updates.
+
+See [DEPLOYMENT-README.md](DEPLOYMENT-README.md) for the verified deployment,
+backups, and rollback, and [mysql_migration/README.md](mysql_migration/README.md)
+for the schema and migration tools. Install the root `requirements.txt`.
+
+**Frontend synchronization is deferred.** The deployed page uses cookie auth
+and inline JavaScript. This repository's `templates/index.html` still belongs
+to the earlier implementation and loads `production.js`; it has not been
+replaced. For the new backend, use the verified deployed template through
+`APP_TEMPLATE_PATH`. This repository is not yet a complete frontend snapshot
+for a fresh deployment. Do not deploy its current template over the live page.
+
+The existing `main.py`, `database.py`, `auth.py`, and `production/` implementation
+are preserved. Their `CONNECTIONSTRING` setup and `production/` schema are separate
+from the deployed `MYSQL_DATABASE_URL` implementation. Do not mix their schemas.
+
+Run all local tests with `python -B -m unittest discover -s tests -v`.
+Rebuild the current schema with `python -B -m mysql_migration.build_schema`.
+
+The 18 new backend/migration tests pass. The retained application's earlier
+tests currently fail in the committed baseline as well as this working tree;
+see [VERIFICATION.md](VERIFICATION.md). They have not been weakened or removed.
+
+## Earlier implementation documentation
 
 ## Production MySQL integration
 

@@ -1,3 +1,10 @@
+> This document describes the earlier `main:app` bearer-token integration,
+> not the currently deployed cookie-based `mysql_portal:app` service. Its
+> `production/` schema targets `swollenhippo_industries`, whereas the live
+> service uses `mysql_migration/` and `swollenhippo_db`. Follow
+> [DEPLOYMENT-README.md](DEPLOYMENT-README.md) for the deployed implementation.
+> Frontend synchronization remains deferred; do not mix the two configurations.
+
 # Production database integration
 
 The existing FastAPI entry point (`main:app`) and HTML page now support the supplied six-table MySQL schema. SQLite retains the original demo behavior; MySQL defaults to production mode. Set `DATABASE_MODE=demo` only for the old demonstration schema. The demo role header grants access in demo mode and must not be used for a public deployment.
